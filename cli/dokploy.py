@@ -42,6 +42,9 @@ class DokployClient:
                 raise ValueError(f"Unsupported method: {method}")
             
             response.raise_for_status()
+            # Handle empty responses (common for deploy/restart/stop)
+            if not response.text or response.text.strip() == '':
+                return {'success': True, 'status': response.status_code}
             return response.json()
             
         except requests.exceptions.RequestException as e:
@@ -66,9 +69,20 @@ class DokployClient:
         })
     
     # Applications
-    def list_applications(self) -> Dict:
-        """GET /api/application.all"""
-        return self._request('GET', '/api/application.all')
+    def list_applications(self) -> list:
+        """Get applications from project.all (application.all not available in all versions)"""
+        projects = self.list_projects()
+        apps = []
+        for project in projects if isinstance(projects, list) else []:
+            for env in project.get('environments', []):
+                for app in env.get('applications', []):
+                    apps.append({
+                        'name': app.get('name'),
+                        'id': app.get('applicationId'),
+                        'status': app.get('applicationStatus'),
+                        'project': project.get('name')
+                    })
+        return apps
     
     def create_application(self, name: str, environment_id: str, description: str = "") -> Dict:
         """POST /api/application.create"""
@@ -99,9 +113,19 @@ class DokployClient:
         })
     
     # Compose
-    def list_compose(self) -> Dict:
-        """GET /api/compose.all"""
-        return self._request('GET', '/api/compose.all')
+    def list_compose(self) -> list:
+        """Get compose from project.all (compose.all not available in all versions)"""
+        projects = self.list_projects()
+        compose_list = []
+        for project in projects if isinstance(projects, list) else []:
+            for env in project.get('environments', []):
+                for compose in env.get('compose', []):
+                    compose_list.append({
+                        'name': compose.get('name', 'Unnamed'),
+                        'id': compose.get('composeId'),
+                        'project': project.get('name')
+                    })
+        return compose_list
     
     def deploy_compose(self, compose_id: str) -> Dict:
         """POST /api/compose.deploy"""
@@ -242,11 +266,15 @@ Examples:
         
         elif args.command == 'apps':
             if args.app_cmd == 'list':
-                result = client.list_applications()
-                data = result if isinstance(result, list) else result.get('result', {}).get('data', {}).get('json', [])
-                print(f"Applications found: {len(data)}")
-                for app in data:
-                    print(f"  - {app.get('name')} ({app.get('id')})")
+                apps = client.list_applications()
+                print(f"Applications found: {len(apps)}")
+                print()
+                for app in apps:
+                    print(f"  - {app.get('name')}")
+                    print(f"    ID: {app.get('id')}")
+                    print(f"    Status: {app.get('status')}")
+                    print(f"    Project: {app.get('project')}")
+                    print()
                     
             elif args.app_cmd == 'deploy':
                 result = client.deploy_application(args.id, args.title)
@@ -262,11 +290,14 @@ Examples:
         
         elif args.command == 'compose':
             if args.compose_cmd == 'list':
-                result = client.list_compose()
-                data = result if isinstance(result, list) else result.get('result', {}).get('data', {}).get('json', [])
-                print(f"Compose projects found: {len(data)}")
-                for comp in data:
-                    print(f"  - {comp.get('name')} ({comp.get('id')})")
+                compose_list = client.list_compose()
+                print(f"Compose projects found: {len(compose_list)}")
+                print()
+                for comp in compose_list:
+                    print(f"  - {comp.get('name')}")
+                    print(f"    ID: {comp.get('id')}")
+                    print(f"    Project: {comp.get('project')}")
+                    print()
                     
             elif args.compose_cmd == 'deploy':
                 result = client.deploy_compose(args.id)
