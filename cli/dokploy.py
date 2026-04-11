@@ -109,12 +109,9 @@ class DokployClient:
         })
     
     # Deployments
-    def list_deployments(self, app_id: Optional[str] = None) -> List:
-        """GET /api/deployment.all or /api/deployment.all?applicationId=xxx"""
-        endpoint = 'deployment.all'
-        if app_id:
-            endpoint += f'?applicationId={app_id}'
-        return self._request('GET', endpoint)
+    def list_deployments(self, app_id: str) -> List:
+        """GET /api/deployment.all?applicationId=xxx (app_id required)"""
+        return self._request('GET', f'deployment.all?applicationId={app_id}')
     
     def get_deployment_logs(self, deployment_id: str) -> str:
         """GET /api/deployment.getLogs?deploymentId=xxx"""
