@@ -1,0 +1,2 @@
+[console_scripts]
+dokploy = cli.dokploy:main

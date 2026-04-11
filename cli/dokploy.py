@@ -1,339 +1,286 @@
-#!/usr/bin/env python3
-"""
-Dokploy CLI - Advanced tools for managing Dokploy deployments
-
-Usage:
-    dokploy deploy --project <name> [--env <environment>]
-    dokploy logs --project <name> [--service <service>] [--follow]
-    dokploy security scan [--project <name>]
-    dokploy template list
-    dokploy template generate --type <template-type> [--output <dir>]
-    dokploy backup --project <name> [--destination <path>]
-    dokploy health --project <name>
-
-Commands:
-    deploy      Deploy application to Dokploy
-    logs        View service logs
-    security    Security scanning and hardening
-    template    Generate configurations from templates
-    backup      Backup volumes and data
-    health      Check service health
-    init        Initialize new project
-    monitor     Setup monitoring and alerts
-"""
-
-import os
-import sys
-import yaml
-import json
-import argparse
-import subprocess
-from pathlib import Path
-from datetime import datetime
-
-# Configuration
-CONFIG_FILE = "dokploy.yaml"
-VERSION = "1.0.0"
-
-class DokployCLI:
-    def __init__(self):
-        self.config = self.load_config()
-    
-    def load_config(self):
-        """Load dokploy.yaml configuration"""
-        if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, 'r') as f:
-                return yaml.safe_load(f)
-        return {}
-    
-    def deploy(self, project, env="production"):
-        """Deploy application to Dokploy"""
-        print(f"[DEPLOY] Deploying {project} to {env}...")
-        
-        # Get environment config
-        env_config = self.config.get('environments', {}).get(env, {})
-        dokploy_url = env_config.get('dokploy_url')
-        api_token = os.environ.get('DOKPLOY_TOKEN') or env_config.get('api_token')
-        
-        if not dokploy_url or not api_token:
-            print("[ERROR] Error: DOKPLOY_URL and DOKPLOY_TOKEN required")
-            sys.exit(1)
-        
-        # Run security scan first
-        print("[LOCK] Running security scan...")
-        issues = self.security_scan(project)
-        if issues['critical'] > 0:
-            print(f"[ERROR] {issues['critical']} critical security issues found!")
-            print("Fix issues before deploying or use --skip-security-check")
-            sys.exit(1)
-        
-        # Deploy via API
-        print(f"[CONNECT] Deploying to {dokploy_url}...")
-        # In real implementation, this would call Dokploy API
-        print("[OK] Deployment triggered successfully!")
-        
-        # Monitor deployment
-        print("[WAIT] Monitoring deployment...")
-        print("Use 'dokploy logs --follow' to watch progress")
-    
-    def logs(self, project, service=None, follow=False):
-        """View service logs"""
-        print(f"[LIST] Logs for {project}" + (f" / {service}" if service else ""))
-        
-        if follow:
-            print("[WATCH] Following logs (Ctrl+C to exit)...")
-            # In real implementation, stream logs
-        else:
-            # Show recent logs
-            print("Recent logs...")
-    
-    def security_scan(self, project=None):
-        """Scan for security issues"""
-        print("[LOCK] Security Scan")
-        print("=" * 50)
-        
-        issues = {
-            'critical': 0,
-            'warning': 0,
-            'info': 0
-        }
-        
-        # Check if docker-compose.yml exists
-        if not os.path.exists('docker-compose.yml'):
-            print("[ERROR] Critical: docker-compose.yml not found")
-            issues['critical'] += 1
-            return issues
-        
-        with open('docker-compose.yml', 'r') as f:
-            compose = yaml.safe_load(f)
-        
-        # Check for security issues
-        services = compose.get('services', {})
-        
-        for service_name, service_config in services.items():
-            print(f"\n[PKG] Service: {service_name}")
-            
-            # Check for root user
-            user = service_config.get('user')
-            if not user or user == 'root':
-                print("  [WARN]  Warning: Container running as root")
-                issues['warning'] += 1
-            else:
-                print("  [OK] Running as non-root user")
-            
-            # Check for secrets in environment
-            env = service_config.get('environment', [])
-            for var in env:
-                if '=' in str(var) and any(secret in str(var).lower() 
-                    for secret in ['password', 'secret', 'key', 'token']):
-                    print(f"  [WARN]  Warning: Potential secret in environment: {var.split('=')[0]}")
-                    issues['warning'] += 1
-            
-            # Check for health checks
-            if 'healthcheck' not in service_config:
-                print("  [WARN]  Warning: No health check configured")
-                issues['warning'] += 1
-            else:
-                print("  [OK] Health check configured")
-            
-            # Check resource limits
-            if 'deploy' not in service_config or 'resources' not in service_config.get('deploy', {}):
-                print("  [WARN]  Warning: No resource limits set")
-                issues['warning'] += 1
-            else:
-                print("  [OK] Resource limits configured")
-        
-        # Check networks
-        networks = compose.get('networks', {})
-        if 'dokploy-network' not in networks and 'dokploy-network' not in str(compose):
-            print("\n[ERROR] Critical: dokploy-network not configured")
-            issues['critical'] += 1
-        else:
-            print("\n[OK] dokploy-network configured")
-        
-        # Summary
-        print("\n" + "=" * 50)
-        print(f"Scan complete: {issues['critical']} critical, {issues['warning']} warnings")
-        
-        return issues
-    
-    def template_list(self):
-        """List available templates"""
-        templates = [
-            ("nodejs-postgres", "Node.js + PostgreSQL", "Express/Fastify API with database"),
-            ("nextjs-fullstack", "Next.js Full Stack", "Next.js + PostgreSQL + Redis"),
-            ("python-fastapi", "Python FastAPI", "Modern Python API with PostgreSQL"),
-            ("python-django", "Django", "Django + PostgreSQL web app"),
-            ("go-api", "Go API", "High-performance Go + PostgreSQL"),
-            ("rust-api", "Rust API", "Memory-safe Rust + PostgreSQL"),
-            ("php-laravel", "Laravel", "PHP Laravel + MySQL"),
-            ("rails-app", "Rails", "Ruby on Rails + PostgreSQL + Redis"),
-        ]
-        
-        print("[LIST] Available Templates")
-        print("=" * 70)
-        print(f"{'Template':<20} {'Stack':<20} {'Description'}")
-        print("-" * 70)
-        for name, stack, desc in templates:
-            print(f"{name:<20} {stack:<20} {desc}")
-    
-    def template_generate(self, template_type, output_dir="."):
-        """Generate configuration from template"""
-        print(f"[PKG] Generating {template_type} template...")
-        
-        # In real implementation, copy from templates/ directory
-        print(f"[OK] Template generated in {output_dir}/")
-        print("\nFiles created:")
-        print("  - docker-compose.yml")
-        print("  - dokploy.yaml")
-        print("  - .env.example")
-        print("  - README.md")
-    
-    def backup(self, project, destination=None):
-        """Backup volumes and data"""
-        print(f"[BACKUP] Backing up {project}...")
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_name = f"{project}_backup_{timestamp}"
-        
-        # Create backup
-        print(f"[PKG] Creating backup: {backup_name}")
-        
-        if destination:
-            if destination.startswith('s3://'):
-                print(f"☁  Uploading to S3...")
-            else:
-                print(f"[BACKUP] Saving to {destination}...")
-        
-        print(f"[OK] Backup complete: {backup_name}")
-    
-    def health_check(self, project):
-        """Check service health"""
-        print(f"[HEALTH] Health check for {project}")
-        print("=" * 50)
-        
-        # Check each service
-        services = ['frontend', 'backend', 'database', 'redis']
-        for service in services:
-            # In real implementation, actual health checks
-            print(f"[OK] {service}: Healthy")
-        
-        print("\n[OK] All services healthy")
-    
-    def init(self, name, template_type="basic"):
-        """Initialize new project"""
-        print(f"[DEPLOY] Initializing project: {name}")
-        print(f"[PKG] Template: {template_type}")
-        
-        # Create directory
-        if not os.path.exists(name):
-            os.makedirs(name)
-        
-        # Generate files
-        print("\nCreating files:")
-        print("  [OK] docker-compose.yml")
-        print("  [OK] dokploy.yaml")
-        print("  [OK] .env.example")
-        print("  [OK] README.md")
-        print("  [OK] .gitignore")
-        
-        print(f"\n[OK] Project {name} initialized!")
-        print(f"\nNext steps:")
-        print(f"  cd {name}")
-        print(f"  cp .env.example .env")
-        print(f"  # Edit .env with your values")
-        print(f"  dokploy security scan")
-        print(f"  dokploy deploy")
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Dokploy CLI - Advanced deployment tools",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-    dokploy init --name myapp --type nextjs-fullstack
-    dokploy security scan
-    dokploy deploy --project myapp --env production
-    dokploy logs --project myapp --follow
-    dokploy template generate --type python-fastapi
-        """
-    )
-    
-    parser.add_argument('--version', action='version', version=f'%(prog)s {VERSION}')
-    
-    subparsers = parser.add_subparsers(dest='command', help='Commands')
-    
-    # Deploy command
-    deploy_parser = subparsers.add_parser('deploy', help='Deploy application')
-    deploy_parser.add_argument('--project', '-p', required=True, help='Project name')
-    deploy_parser.add_argument('--env', '-e', default='production', help='Environment')
-    deploy_parser.add_argument('--skip-security-check', action='store_true', help='Skip security scan')
-    
-    # Logs command
-    logs_parser = subparsers.add_parser('logs', help='View logs')
-    logs_parser.add_argument('--project', '-p', required=True, help='Project name')
-    logs_parser.add_argument('--service', '-s', help='Service name')
-    logs_parser.add_argument('--follow', '-f', action='store_true', help='Follow logs')
-    
-    # Security command
-    security_parser = subparsers.add_parser('security', help='Security operations')
-    security_subparsers = security_parser.add_subparsers(dest='security_command')
-    scan_parser = security_subparsers.add_parser('scan', help='Scan for issues')
-    scan_parser.add_argument('--project', '-p', help='Project name')
-    scan_parser.add_argument('--fail-on-warning', action='store_true', help='Fail on warnings')
-    
-    # Template command
-    template_parser = subparsers.add_parser('template', help='Template operations')
-    template_subparsers = template_parser.add_subparsers(dest='template_command')
-    list_parser = template_subparsers.add_parser('list', help='List templates')
-    generate_parser = template_subparsers.add_parser('generate', help='Generate template')
-    generate_parser.add_argument('--type', '-t', required=True, help='Template type')
-    generate_parser.add_argument('--output', '-o', default='.', help='Output directory')
-    
-    # Backup command
-    backup_parser = subparsers.add_parser('backup', help='Backup operations')
-    backup_parser.add_argument('--project', '-p', required=True, help='Project name')
-    backup_parser.add_argument('--destination', '-d', help='Backup destination (local path or s3://)')
-    
-    # Health command
-    health_parser = subparsers.add_parser('health', help='Health check')
-    health_parser.add_argument('--project', '-p', required=True, help='Project name')
-    
-    # Init command
-    init_parser = subparsers.add_parser('init', help='Initialize project')
-    init_parser.add_argument('--name', '-n', required=True, help='Project name')
-    init_parser.add_argument('--type', '-t', default='basic', help='Template type')
-    
-    args = parser.parse_args()
-    
-    if not args.command:
-        parser.print_help()
-        sys.exit(1)
-    
-    cli = DokployCLI()
-    
-    if args.command == 'deploy':
-        cli.deploy(args.project, args.env)
-    elif args.command == 'logs':
-        cli.logs(args.project, args.service, args.follow)
-    elif args.command == 'security':
-        if args.security_command == 'scan':
-            issues = cli.security_scan(args.project)
-            if args.fail_on_warning and issues['warning'] > 0:
-                sys.exit(1)
-            if issues['critical'] > 0:
-                sys.exit(1)
-    elif args.command == 'template':
-        if args.template_command == 'list':
-            cli.template_list()
-        elif args.template_command == 'generate':
-            cli.template_generate(args.type, args.output)
-    elif args.command == 'backup':
-        cli.backup(args.project, args.destination)
-    elif args.command == 'health':
-        cli.health_check(args.project)
-    elif args.command == 'init':
-        cli.init(args.name, args.type)
-
-if __name__ == '__main__':
-    main()
+#!/usr/bin/env python3
+"""
+Dokploy CLI - Official API Client
+Based on Dokploy API documentation: https://docs.dokploy.com/docs/api
+
+Authentication: x-api-key header (NOT Authorization: Bearer)
+Base URL: https://your-dokploy-instance.com/api/
+"""
+
+import os
+import sys
+import json
+import argparse
+import requests
+from pathlib import Path
+from typing import Optional, Dict, Any
+
+VERSION = "1.0.1"
+
+class DokployClient:
+    """Official Dokploy API Client"""
+    
+    def __init__(self, base_url: str, api_key: str):
+        self.base_url = base_url.rstrip('/')
+        self.api_key = api_key
+        self.headers = {
+            'x-api-key': api_key,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+    
+    def _request(self, method: str, endpoint: str, data: Optional[Dict] = None) -> Dict[str, Any]:
+        """Make API request with correct x-api-key header"""
+        url = f"{self.base_url}{endpoint}"
+        
+        try:
+            if method == 'GET':
+                response = requests.get(url, headers=self.headers, timeout=30)
+            elif method == 'POST':
+                response = requests.post(url, headers=self.headers, json=data, timeout=30)
+            else:
+                raise ValueError(f"Unsupported method: {method}")
+            
+            response.raise_for_status()
+            return response.json()
+            
+        except requests.exceptions.RequestException as e:
+            print(f"[ERROR] API request failed: {e}")
+            if hasattr(e.response, 'status_code'):
+                if e.response.status_code == 401:
+                    print("[ERROR] Invalid API key. Check your x-api-key header.")
+                elif e.response.status_code == 404:
+                    print(f"[ERROR] Endpoint not found: {endpoint}")
+            raise
+    
+    # Projects
+    def list_projects(self) -> Dict:
+        """GET /api/project.all"""
+        return self._request('GET', '/api/project.all')
+    
+    def create_project(self, name: str, description: str = "") -> Dict:
+        """POST /api/project.create"""
+        return self._request('POST', '/api/project.create', {
+            'name': name,
+            'description': description
+        })
+    
+    # Applications
+    def list_applications(self) -> Dict:
+        """GET /api/application.all"""
+        return self._request('GET', '/api/application.all')
+    
+    def create_application(self, name: str, environment_id: str, description: str = "") -> Dict:
+        """POST /api/application.create"""
+        return self._request('POST', '/api/application.create', {
+            'name': name,
+            'environmentId': environment_id,
+            'description': description
+        })
+    
+    def deploy_application(self, application_id: str, title: str = "", description: str = "") -> Dict:
+        """POST /api/application.deploy"""
+        return self._request('POST', '/api/application.deploy', {
+            'applicationId': application_id,
+            'title': title,
+            'description': description
+        })
+    
+    def restart_application(self, application_id: str) -> Dict:
+        """POST /api/application.restart"""
+        return self._request('POST', '/api/application.restart', {
+            'applicationId': application_id
+        })
+    
+    def stop_application(self, application_id: str) -> Dict:
+        """POST /api/application.stop"""
+        return self._request('POST', '/api/application.stop', {
+            'applicationId': application_id
+        })
+    
+    # Compose
+    def list_compose(self) -> Dict:
+        """GET /api/compose.all"""
+        return self._request('GET', '/api/compose.all')
+    
+    def deploy_compose(self, compose_id: str) -> Dict:
+        """POST /api/compose.deploy"""
+        return self._request('POST', '/api/compose.deploy', {
+            'composeId': compose_id
+        })
+    
+    # User
+    def get_user(self) -> Dict:
+        """GET /api/user.get"""
+        return self._request('GET', '/api/user.get')
+    
+    def create_api_key(self, name: str, organization_id: str, **kwargs) -> Dict:
+        """POST /api/user.createApiKey"""
+        data = {
+            'name': name,
+            'metadata': {
+                'organizationId': organization_id
+            }
+        }
+        data.update(kwargs)
+        return self._request('POST', '/api/user.createApiKey', data)
+
+
+def load_config() -> tuple:
+    """Load configuration from environment or files"""
+    # Try environment variables first
+    base_url = os.environ.get('DOKPLOY_URL')
+    api_key = os.environ.get('DOKPLOY_API_KEY') or os.environ.get('DOKPLOY_TOKEN')
+    
+    # Try loading from secrets/dokploy.env
+    if not base_url or not api_key:
+        env_file = Path('secrets/dokploy.env')
+        if env_file.exists():
+            with open(env_file) as f:
+                for line in f:
+                    if '=' in line and not line.startswith('#'):
+                        key, value = line.strip().split('=', 1)
+                        if key == 'DOKPLOY_URL' and not base_url:
+                            base_url = value
+                        elif key in ('DOKPLOY_API_KEY', 'DOKPLOY_TOKEN') and not api_key:
+                            api_key = value
+    
+    return base_url, api_key
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Dokploy CLI - Official API Client',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Environment Variables:
+  DOKPLOY_URL       Your Dokploy instance URL
+  DOKPLOY_API_KEY   Your API key (x-api-key header)
+
+Examples:
+  dokploy projects list
+  dokploy apps list
+  dokploy apps deploy --id APP_ID
+  dokploy compose list
+        """
+    )
+    
+    parser.add_argument('--version', action='version', version=f'%(prog)s {VERSION}')
+    parser.add_argument('--url', help='Dokploy URL (overrides env)')
+    parser.add_argument('--key', help='API key (overrides env)')
+    
+    subparsers = parser.add_subparsers(dest='command', help='Commands')
+    
+    # Projects
+    project_parser = subparsers.add_parser('projects', help='Project operations')
+    project_sub = project_parser.add_subparsers(dest='project_cmd')
+    project_sub.add_parser('list', help='List all projects')
+    create_proj = project_sub.add_parser('create', help='Create new project')
+    create_proj.add_argument('name')
+    create_proj.add_argument('--description', default='')
+    
+    # Applications
+    app_parser = subparsers.add_parser('apps', help='Application operations')
+    app_sub = app_parser.add_subparsers(dest='app_cmd')
+    app_sub.add_parser('list', help='List all applications')
+    deploy_app = app_sub.add_parser('deploy', help='Deploy application')
+    deploy_app.add_argument('--id', required=True, help='Application ID')
+    deploy_app.add_argument('--title', default='')
+    restart_app = app_sub.add_parser('restart', help='Restart application')
+    restart_app.add_argument('--id', required=True)
+    stop_app = app_sub.add_parser('stop', help='Stop application')
+    stop_app.add_argument('--id', required=True)
+    
+    # Compose
+    compose_parser = subparsers.add_parser('compose', help='Docker Compose operations')
+    compose_sub = compose_parser.add_subparsers(dest='compose_cmd')
+    compose_sub.add_parser('list', help='List all compose projects')
+    deploy_compose = compose_sub.add_parser('deploy', help='Deploy compose')
+    deploy_compose.add_argument('--id', required=True, help='Compose ID')
+    
+    # User
+    user_parser = subparsers.add_parser('user', help='User operations')
+    user_sub = user_parser.add_subparsers(dest='user_cmd')
+    user_sub.add_parser('info', help='Get user info')
+    
+    args = parser.parse_args()
+    
+    if not args.command:
+        parser.print_help()
+        sys.exit(1)
+    
+    # Load config
+    base_url, api_key = load_config()
+    
+    # Override with CLI args
+    if args.url:
+        base_url = args.url
+    if args.key:
+        api_key = args.key
+    
+    if not base_url or not api_key:
+        print("[ERROR] Missing DOKPLOY_URL or DOKPLOY_API_KEY")
+        print("Set environment variables or use --url and --key")
+        sys.exit(1)
+    
+    # Create client
+    client = DokployClient(base_url, api_key)
+    
+    try:
+        # Execute command
+        if args.command == 'projects':
+            if args.project_cmd == 'list':
+                result = client.list_projects()
+                data = result if isinstance(result, list) else result.get('result', {}).get('data', {}).get('json', [])
+                print(f"Projects found: {len(data)}")
+                for proj in data:
+                    print(f"  - {proj.get('name')} ({proj.get('id')})")
+                    
+            elif args.project_cmd == 'create':
+                result = client.create_project(args.name, args.description)
+                print(f"Created project: {result}")
+        
+        elif args.command == 'apps':
+            if args.app_cmd == 'list':
+                result = client.list_applications()
+                data = result if isinstance(result, list) else result.get('result', {}).get('data', {}).get('json', [])
+                print(f"Applications found: {len(data)}")
+                for app in data:
+                    print(f"  - {app.get('name')} ({app.get('id')})")
+                    
+            elif args.app_cmd == 'deploy':
+                result = client.deploy_application(args.id, args.title)
+                print(f"Deploy initiated: {result}")
+                
+            elif args.app_cmd == 'restart':
+                result = client.restart_application(args.id)
+                print(f"Restart initiated: {result}")
+                
+            elif args.app_cmd == 'stop':
+                result = client.stop_application(args.id)
+                print(f"Stop initiated: {result}")
+        
+        elif args.command == 'compose':
+            if args.compose_cmd == 'list':
+                result = client.list_compose()
+                data = result if isinstance(result, list) else result.get('result', {}).get('data', {}).get('json', [])
+                print(f"Compose projects found: {len(data)}")
+                for comp in data:
+                    print(f"  - {comp.get('name')} ({comp.get('id')})")
+                    
+            elif args.compose_cmd == 'deploy':
+                result = client.deploy_compose(args.id)
+                print(f"Deploy initiated: {result}")
+        
+        elif args.command == 'user':
+            if args.user_cmd == 'info':
+                result = client.get_user()
+                print(json.dumps(result, indent=2))
+    
+    except Exception as e:
+        print(f"[ERROR] {e}")
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
