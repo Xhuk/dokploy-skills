@@ -1,0 +1,41 @@
+project:
+  name: myapp
+  description: Node.js application with PostgreSQL
+
+environments:
+  production:
+    dokploy_url: https://dokploy.example.com
+    domain: app.example.com
+    
+  staging:
+    dokploy_url: https://dokploy.example.com
+    domain: staging.example.com
+
+variables:
+  required:
+    - DB_USER
+    - DB_PASSWORD
+    - DB_NAME
+    - DOMAIN
+  optional:
+    - NODE_ENV=production
+    - PORT=3000
+
+volumes:
+  - ../files/uploads:/app/uploads
+  - ../files/logs:/app/logs
+  - ../files/postgres:/var/lib/postgresql/data
+
+backup:
+  schedule: "0 2 * * *"
+  retention: 7
+  destinations:
+    - local:../backups
+    - s3://mybucket/backups
+
+health:
+  endpoints:
+    - /health
+    - /api/status
+  timeout: 30s
+  interval: 60s

@@ -1,0 +1,101 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: "1001:1001"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
+      - PORT=3000
+    volumes:
+      - ../files/uploads:/app/uploads:rw
+      - ../files/logs:/app/logs:rw
+    networks:
+      - dokploy-network
+      - backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.${PROJECT_NAME}.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.${PROJECT_NAME}.entrypoints=websecure"
+      - "traefik.http.routers.${PROJECT_NAME}.tls.certResolver=letsencrypt"
+      - "traefik.http.services.${PROJECT_NAME}.loadbalancer.server.port=3000"
+      - "traefik.http.middlewares.${PROJECT_NAME}-security.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.${PROJECT_NAME}-security.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.${PROJECT_NAME}-security.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.${PROJECT_NAME}-security.headers.stsPreload=true"
+      - "traefik.http.middlewares.${PROJECT_NAME}-security.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.${PROJECT_NAME}-security.headers.browserXssFilter=true"
+      - "traefik.http.routers.${PROJECT_NAME}.middlewares=${PROJECT_NAME}-security"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:15-alpine
+    user: "999:999"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+    volumes:
+      - ../files/postgres:/var/lib/postgresql/data
+    networks:
+      - backend
+    labels:
+      - "traefik.enable=false"
+
+networks:
+  dokploy-network:
+    external: true
+  backend:
+    driver: bridge
+    internal: true

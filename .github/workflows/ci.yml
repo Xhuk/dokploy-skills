@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install flake8 pytest
+
+    - name: Lint with flake8
+      run: |
+        # Stop on syntax errors or undefined names
+        flake8 cli/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings
+        flake8 cli/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Test CLI imports
+      run: |
+        python -c "from cli.dokploy import DokployCLI; print('CLI imports OK')"
+
+    - name: Check template files
+      run: |
+        test -f templates/nodejs-postgres/docker-compose.yml
+        test -f templates/nodejs-postgres/Dockerfile
+        test -f templates/nodejs-postgres/dokploy.yaml
+        echo "All template files present"
+
+    - name: Validate YAML files
+      run: |
+        python -c "
+import yaml
+import os
+
+files = [
+    'templates/nodejs-postgres/docker-compose.yml',
+    'templates/nodejs-postgres/dokploy.yaml'
+]
+
+for f in files:
+    if os.path.exists(f):
+        with open(f) as file:
+            yaml.safe_load(file)
+        print(f'OK: {f}')
+    else:
+        print(f'ERROR: {f} not found')
+        exit(1)
+"
