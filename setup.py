@@ -34,7 +34,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "dokploy=cli.dokploy:main",
+            "dokploy-skill=cli.dokploy:main",
         ],
     },
     include_package_data=True,
