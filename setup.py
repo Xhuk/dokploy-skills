@@ -11,7 +11,8 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/Xhuk/dokploy-skills",
-    packages=find_packages(),
+    packages=find_packages() + ['cli'],
+    py_modules=['cli.dokploy', 'cli.ai_env_detector'],
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
@@ -34,7 +35,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "dokploy=cli.dokploy:main",
+            "dokploy-skills=cli.dokploy:main",
         ],
     },
     include_package_data=True,
@@ -42,3 +43,4 @@ setup(
         "": ["templates/**/*", "docs/**/*"],
     },
 )
+
