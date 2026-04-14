@@ -1,7 +1,7 @@
 # Dokploy Skill
 
 **ID**: dokploy-deployment  
-**Version**: 1.1.0  
+**Version**: 1.2.0  
 **Source**: https://docs.dokploy.com/docs/api  
 **Category**: DevOps / Deployment  
 
@@ -23,7 +23,35 @@ Dokploy uses **API Key Authentication** via the `x-api-key` header.
 
 ## API Overview
 
-**Base URL:** `https://your-dokploy-instance.com/api/`
+Dokploy exposes **two API layers** that behave differently:
+
+### 1. OpenAPI/REST Endpoints
+**Pattern:** `GET|POST /api/<procedure>`
+
+Used by most read endpoints (`project.all`, `application.one`, etc.).  
+**Body:** plain JSON object.
+
+```bash
+curl -H "x-api-key: KEY" \
+  -X POST https://dokploy.example.com/api/application.stop \
+  -d '{"applicationId":"APP_ID"}'
+```
+
+### 2. tRPC Endpoints
+**Pattern:** `GET|POST /api/trpc/<procedure>`
+
+Used by many mutations (`application.deploy`, `application.rebuild`, etc.).  
+**Body:** must be wrapped in `{"json": <payload>}`.
+
+```bash
+curl -H "x-api-key: KEY" \
+  -X POST https://dokploy.example.com/api/trpc/application.deploy \
+  -d '{"json":{"applicationId":"APP_ID","title":"v1.2.0"}}'
+```
+
+**Critical:** Some endpoints (like `application.deploy`) return `Invalid JSON` on the REST layer but work perfectly on the tRPC layer.
+
+**Base URL:** `https://your-dokploy-instance.com/`
 
 **Authentication Header:** `x-api-key`
 
@@ -74,15 +102,17 @@ GET /api/project.all
 ### 2. Deploy Application
 
 ```bash
-POST /api/application.deploy
+POST /api/trpc/application.deploy
 ```
 
 **Body:**
 ```json
 {
-  "applicationId": "app_xxx",
-  "title": "Deploy v1.2.0",
-  "description": "Optional description"
+  "json": {
+    "applicationId": "app_xxx",
+    "title": "Deploy v1.2.0",
+    "description": "Optional description"
+  }
 }
 ```
 
@@ -105,7 +135,24 @@ POST /api/application.restart
 }
 ```
 
-### 5. Docker Compose Operations
+### 5. Update Application Source/Config
+
+```bash
+POST /api/application.update
+```
+
+**Body:** (plain JSON — tRPC fallback also supported)
+```json
+{
+  "applicationId": "app_xxx",
+  "repository": "my-repo",
+  "branch": "main",
+  "dockerfile": "Dockerfile",
+  "buildPath": "."
+}
+```
+
+### 6. Docker Compose Operations
 
 ```bash
 # List compose projects
@@ -118,7 +165,7 @@ POST /api/compose.deploy
 }
 ```
 
-### 6. Database Operations
+### 7. Database Operations
 
 ```bash
 # PostgreSQL
@@ -346,6 +393,12 @@ Steps:
 ---
 
 ## Version History
+
+- **1.2.0** (2026-04-14): Seamless REST + tRPC hybrid support
+  - Documented tRPC vs REST API layers
+  - Added `update_application`, `restart_application`, `list_containers`
+  - CLI automatically falls back to tRPC when REST mutations fail
+  - Fixed `application.deploy` to use correct tRPC JSON wrapper
 
 - **1.1.0** (2026-04-11): Updated with official API documentation
   - Correct authentication: `x-api-key` header
