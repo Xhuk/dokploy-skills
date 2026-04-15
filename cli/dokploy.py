@@ -3,9 +3,13 @@
 Dokploy CLI - Hybrid REST + tRPC API Client
 Based on official Dokploy API: https://docs.dokploy.com/docs/api
 
-Dokploy exposes two API layers:
-  - OpenAPI/REST:  GET/POST /api/<procedure>  (used by most read endpoints)
-  - tRPC:          POST /api/trpc/<procedure> with {"json": payload} (used by mutations)
+Dokploy API support is not always uniform across installs. Some servers expose:
+  - OpenAPI/REST:  GET/POST /api/<procedure>
+  - tRPC:          POST /api/trpc/<procedure> with {"json": payload}
+
+Important:
+  - Do not assume one API layer works for every endpoint.
+  - Prefer endpoint-level fallback instead of version-wide assumptions.
 
 Authentication: x-api-key header
 Base URL: https://instance.com/
@@ -79,6 +83,16 @@ class DokployClient:
                     print(f"[ERROR] Response: {e.response.text[:500]}")
             raise
 
+    def _extract_app_from_projects(self, app_id: str) -> Dict:
+        """Fallback when application.one/application.all is unavailable on a server."""
+        projects = self.list_projects()
+        for proj in projects:
+            for env in proj.get('environments', []):
+                for app in env.get('applications', []):
+                    if app.get('applicationId') == app_id:
+                        return app
+        raise KeyError(f"Application not found via project.all fallback: {app_id}")
+
     # Projects
     def list_projects(self) -> List:
         """GET /api/project.all"""
@@ -104,7 +118,10 @@ class DokployClient:
 
     def get_application(self, app_id: str) -> Dict:
         """GET /api/application.one?applicationId=xxx"""
-        return self._rest_request('GET', f'application.one?applicationId={app_id}')
+        try:
+            return self._rest_request('GET', f'application.one?applicationId={app_id}')
+        except Exception:
+            return self._extract_app_from_projects(app_id)
 
     def update_application(self, app_id: str, **fields) -> Dict:
         """POST /api/application.update (REST) or /api/trpc/application.update (tRPC fallback)"""
@@ -118,17 +135,27 @@ class DokployClient:
             raise
 
     def deploy_application(self, app_id: str, title: str = "") -> Any:
-        """POST /api/trpc/application.deploy (tRPC)"""
-        return self._trpc_request('application.deploy', {
+        """Deploy app, preferring REST and falling back to tRPC when needed."""
+        payload = {
             'applicationId': app_id,
             'title': title
-        })
+        }
+        try:
+            return self._rest_request('POST', 'application.deploy', payload)
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code in (400, 404, 405, 500):
+                return self._trpc_request('application.deploy', payload)
+            raise
 
     def rebuild_application(self, app_id: str) -> Any:
-        """POST /api/trpc/application.rebuild (tRPC)"""
-        return self._trpc_request('application.rebuild', {
-            'applicationId': app_id
-        })
+        """Rebuild app, preferring REST and falling back to tRPC when needed."""
+        payload = {'applicationId': app_id}
+        try:
+            return self._rest_request('POST', 'application.rebuild', payload)
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code in (400, 404, 405, 500):
+                return self._trpc_request('application.rebuild', payload)
+            raise
 
     def stop_application(self, app_id: str) -> Any:
         """POST /api/application.stop"""
@@ -144,9 +171,14 @@ class DokployClient:
 
     def restart_application(self, app_id: str) -> Any:
         """POST /api/application.restart"""
-        return self._rest_request('POST', 'application.restart', {
-            'applicationId': app_id
-        })
+        payload = {'applicationId': app_id}
+        try:
+            return self._rest_request('POST', 'application.restart', payload)
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                self.stop_application(app_id)
+                return self.start_application(app_id)
+            raise
 
     # Deployments
     def list_deployments(self, app_id: str) -> List:
@@ -260,7 +292,7 @@ Examples:
     get_app = app_sub.add_parser('get', help='Get application details')
     get_app.add_argument('--id', required=True, help='Application ID')
 
-    deploy_app = app_sub.add_parser('deploy', help='Deploy application (tRPC)')
+    deploy_app = app_sub.add_parser('deploy', help='Deploy application (REST first, tRPC fallback)')
     deploy_app.add_argument('--id', required=True, help='Application ID')
     deploy_app.add_argument('--title', default='', help='Deployment title')
 

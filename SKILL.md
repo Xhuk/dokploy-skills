@@ -1,7 +1,7 @@
 # Dokploy Skill
 
 **ID**: dokploy-deployment  
-**Version**: 1.2.0  
+**Version**: 1.3.0  
 **Source**: https://docs.dokploy.com/docs/api  
 **Category**: DevOps / Deployment  
 
@@ -23,7 +23,7 @@ Dokploy uses **API Key Authentication** via the `x-api-key` header.
 
 ## API Overview
 
-Dokploy exposes **two API layers** that behave differently:
+Dokploy exposes **two API layers** that can behave differently per endpoint:
 
 ### 1. OpenAPI/REST Endpoints
 **Pattern:** `GET|POST /api/<procedure>`
@@ -40,7 +40,7 @@ curl -H "x-api-key: KEY" \
 ### 2. tRPC Endpoints
 **Pattern:** `GET|POST /api/trpc/<procedure>`
 
-Used by many mutations (`application.deploy`, `application.rebuild`, etc.).  
+Used by many mutations on some installs.  
 **Body:** must be wrapped in `{"json": <payload>}`.
 
 ```bash
@@ -49,7 +49,15 @@ curl -H "x-api-key: KEY" \
   -d '{"json":{"applicationId":"APP_ID","title":"v1.2.0"}}'
 ```
 
-**Critical:** Some endpoints (like `application.deploy`) return `Invalid JSON` on the REST layer but work perfectly on the tRPC layer.
+**Critical:** Do not assume one layer works for every endpoint on every server.
+
+Real-world pattern:
+- one Dokploy server can expose `GET /api/project.all`
+- but return `404` for `GET /api/application.all`
+- while still accepting `POST /api/application.deploy`
+- and rejecting the equivalent tRPC route, or vice versa
+
+Treat compatibility as **endpoint-level**, not just "this server is REST" or "this server is tRPC".
 
 **Base URL:** `https://your-dokploy-instance.com/`
 
@@ -102,16 +110,25 @@ GET /api/project.all
 ### 2. Deploy Application
 
 ```bash
-POST /api/trpc/application.deploy
+POST /api/application.deploy
 ```
 
 **Body:**
 ```json
 {
+  "applicationId": "app_xxx",
+  "title": "Deploy v1.2.0"
+}
+```
+
+Fallback if REST returns `404`, `405`, `400`, or `500`:
+
+```bash
+POST /api/trpc/application.deploy
+{
   "json": {
     "applicationId": "app_xxx",
-    "title": "Deploy v1.2.0",
-    "description": "Optional description"
+    "title": "Deploy v1.2.0"
   }
 }
 ```
@@ -121,6 +138,10 @@ POST /api/trpc/application.deploy
 ```bash
 GET /api/application.all
 ```
+
+Fallback when unavailable:
+- extract applications from `GET /api/project.all`
+- read `projects[].environments[].applications[]`
 
 ### 4. Restart Application
 
@@ -134,6 +155,10 @@ POST /api/application.restart
   "applicationId": "app_xxx"
 }
 ```
+
+Fallback when unavailable:
+- try `POST /api/application.stop`
+- then `POST /api/application.start`
 
 ### 5. Update Application Source/Config
 
@@ -330,6 +355,16 @@ export DOKPLOY_API_KEY="your_key"
 }
 ```
 
+### Compatibility Rule
+
+When an endpoint returns `404`, do not conclude "the whole API format is wrong".
+
+Instead:
+1. confirm auth with `GET /api/project.all`
+2. test the specific endpoint on REST
+3. only then test the same operation on tRPC
+4. if both fail, use a documented fallback such as extracting from `project.all`
+
 ---
 
 ## Response Format
@@ -393,6 +428,11 @@ Steps:
 ---
 
 ## Version History
+
+- **1.3.0** (2026-04-15): Endpoint-level compatibility guidance
+  - Corrected `application.deploy` guidance to prefer REST first, then tRPC fallback
+  - Added fallback rule for `application.one` / `application.all` via `project.all`
+  - Documented that Dokploy compatibility varies per endpoint, not only per server version
 
 - **1.2.0** (2026-04-14): Seamless REST + tRPC hybrid support
   - Documented tRPC vs REST API layers

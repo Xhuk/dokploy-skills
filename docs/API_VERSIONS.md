@@ -1,6 +1,6 @@
 # Dokploy API Versions
 
-> Not all Dokploy servers use the same API format. This guide helps you identify which version you have.
+> Not all Dokploy servers use the same API format. This guide helps you identify what your server supports, but remember that support can vary per endpoint.
 
 ---
 
@@ -38,16 +38,47 @@ Response: [{"result": {"data": {"json": [{"projectId": "xxx"}]}}}]
 
 ---
 
+## Important Limitation
+
+Do not overfit to a single label like "this server is REST" or "this server is tRPC".
+
+In practice, some installs behave like this:
+- `GET /api/project.all` works
+- `GET /api/application.all` returns `404`
+- `POST /api/application.deploy` works on REST
+- the equivalent tRPC mutation is missing or behaves differently
+
+That means compatibility should be treated as:
+
+- server-level for orientation
+- endpoint-level for automation
+
 ## How to Identify Your Version
 
 ### Method 1: Test the URL
 
 ```bash
-# Test REST
+# Test a stable REST reader first
 curl -H "x-api-key: YOUR_KEY" https://your-dokploy.com/api/project.all
 
 # If 404, try tRPC
 curl -H "x-api-key: YOUR_KEY" https://your-dokploy.com/api/trpc/project.all?batch=1
+```
+
+Then test the specific mutation you care about, for example deploy:
+
+```bash
+# Try REST deploy
+curl -X POST -H "x-api-key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"applicationId":"APP_ID","title":"Smoke deploy"}' \
+  https://your-dokploy.com/api/application.deploy
+
+# If that route is unavailable, try tRPC deploy
+curl -X POST -H "x-api-key: YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"json":{"applicationId":"APP_ID","title":"Smoke deploy"}}' \
+  https://your-dokploy.com/api/trpc/application.deploy
 ```
 
 ### Method 2: Check Dokploy Version
@@ -72,14 +103,15 @@ docker logs dokploy | head -20
 
 ---
 
-## VetGroom Server (Your Case)
+## Example: Mixed Compatibility Server
 
-Based on testing:
+Based on real testing:
 
 | Aspect | Value |
 |--------|-------|
 | **URL** | https://internal.vetgroom.com.mx |
-| **Format** | REST (not tRPC) |
+| **Reader support** | REST |
+| **Mutation support** | Mixed, validate per endpoint |
 | **Projects** | `/api/project.all` |
 | **Deploy** | `/api/application.deploy` |
 | **Token** | `sfox_...` (custom format) |
@@ -97,19 +129,23 @@ dokploy apps deploy --id APP_ID
 dokploy user info
 ```
 
-**NOT Working:**
-- `dokploy apps restart` (endpoint not available in this version)
+**Observed gaps:**
+- some installs do not expose `application.all`
+- some installs do not expose `application.restart`
+- some installs accept REST `application.deploy` while tRPC deploy is absent or unreliable
 
 ---
 
 ## CLI Auto-Detection
 
-The Dokploy CLI auto-detects the API format:
+The Dokploy CLI should auto-detect support conservatively:
 
 ```python
-# 1. Try REST first (GET /api/project.all)
+# 1. Try a stable REST reader first (GET /api/project.all)
 # 2. If 404, try tRPC (GET /api/trpc/project.all?batch=1)
-# 3. Use whichever works
+# 3. For each mutation, try REST first
+# 4. If the specific REST mutation fails with 404/405/400/500, try tRPC
+# 5. If list/detail endpoints are missing, fall back to project.all extraction
 ```
 
 You don't need to configure this manually.
@@ -161,4 +197,4 @@ docker logs dokploy
 | VetGroom | REST | `https://internal.vetgroom.com.mx/api/` |
 | Standard v0.10+ | tRPC | `https://dokploy.com/api/trpc/` |
 
-**Always test first, don't assume based on documentation.**
+**Always test first, and validate the endpoint you actually need.**
