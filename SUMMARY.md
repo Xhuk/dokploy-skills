@@ -17,8 +17,11 @@ dokploy-skills/
 │   └── ai-env-detector.py      # AI environment detector (6.8KB)
 │
 ├── docs/
-│   ├── ai-integration.md       # AI assistant integration guide (6.2KB)
-│   └── security-best-practices.md  # Security hardening guide (9.5KB)
+│   ├── REST_OPERATIONS.md      # Practical REST playbook + fallbacks
+│   ├── API_VERSIONS.md         # REST vs tRPC compatibility
+│   ├── API_REFERENCE.md        # Endpoint catalogue
+│   ├── ai-integration.md       # AI assistant integration guide
+│   └── security-best-practices.md  # Security hardening guide
 │
 ├── templates/
 │   └── nodejs-postgres/        # Node.js + PostgreSQL template

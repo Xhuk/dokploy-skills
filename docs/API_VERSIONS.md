@@ -1,20 +1,20 @@
-# Dokploy API Versions
+# Dokploy API Versions & Compatibility
 
-> Not all Dokploy servers use the same API format. This guide helps you identify what your server supports, but remember that support can vary per endpoint.
+> Not all Dokploy servers expose the same endpoints the same way. Identify support first, then automate.
 
 ---
 
-## Two API Formats
+## Two API Layers
 
-Dokploy has evolved through different API architectures:
+Dokploy installs commonly expose one or both of these layers:
 
-### 1. REST API (Older versions, some custom installs)
+### 1. OpenAPI / REST
 
 **Characteristics:**
 - Endpoints: `/api/project.all`, `/api/application.deploy`
-- Request body: Direct JSON `{ "key": "value" }`
-- Response: Direct JSON array or object
-- Token format: Any (depends on setup)
+- Request body: direct JSON `{ "key": "value" }`
+- Response: direct JSON array/object, or a light wrapper
+- Auth: `x-api-key`
 
 **Example:**
 ```bash
@@ -22,179 +22,205 @@ GET /api/project.all
 Response: [{"projectId": "xxx", "name": "My Project"}]
 ```
 
-### 2. tRPC API (v0.10+, standard installs)
+### 2. tRPC
 
 **Characteristics:**
-- Endpoints: `/api/trpc/project.all?batch=1`
-- Request body: Wrapped `{"0": { "key": "value" }}`
-- Response: Wrapped `[{"result": {"data": {"json": [...]}}}]`
-- Token format: Usually `dokploy_...` prefix
+- Endpoints: `/api/trpc/<procedure>` (sometimes with `?batch=1` for reads)
+- Mutation body: wrapped `{"json": <payload>}`
+- Response: often wrapped `{"result":{"data":{"json": ...}}}`
+- Auth: same `x-api-key`
 
 **Example:**
 ```bash
-GET /api/trpc/project.all?batch=1
-Response: [{"result": {"data": {"json": [{"projectId": "xxx"}]}}}]
+POST /api/trpc/application.deploy
+Body: {"json":{"applicationId":"APP_ID","title":"Smoke deploy"}}
 ```
 
 ---
 
-## Important Limitation
+## Critical Rule
 
-Do not overfit to a single label like "this server is REST" or "this server is tRPC".
+Do **not** overfit to a single label like "this server is REST" or "this server is tRPC".
 
-In practice, some installs behave like this:
+Real mixed installs often look like this:
 - `GET /api/project.all` works
 - `GET /api/application.all` returns `404`
 - `POST /api/application.deploy` works on REST
 - the equivalent tRPC mutation is missing or behaves differently
 
-That means compatibility should be treated as:
+Compatibility must be treated as:
 
-- server-level for orientation
-- endpoint-level for automation
+1. **server-level** for orientation (probe readers)
+2. **endpoint-level** for every mutation you automate
 
-## How to Identify Your Version
+---
 
-### Method 1: Test the URL
+## How to Identify Support
+
+### Method 1: Probe a stable reader, then the mutation
 
 ```bash
-# Test a stable REST reader first
+# Stable reader first
 curl -H "x-api-key: YOUR_KEY" https://your-dokploy.com/api/project.all
 
-# If 404, try tRPC
-curl -H "x-api-key: YOUR_KEY" https://your-dokploy.com/api/trpc/project.all?batch=1
+# If 404, try tRPC reader
+curl -H "x-api-key: YOUR_KEY" \
+  "https://your-dokploy.com/api/trpc/project.all?batch=1"
 ```
 
-Then test the specific mutation you care about, for example deploy:
+Then probe the mutation you actually need:
 
 ```bash
-# Try REST deploy
+# REST deploy
 curl -X POST -H "x-api-key: YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{"applicationId":"APP_ID","title":"Smoke deploy"}' \
   https://your-dokploy.com/api/application.deploy
 
-# If that route is unavailable, try tRPC deploy
+# tRPC deploy fallback
 curl -X POST -H "x-api-key: YOUR_KEY" \
   -H "Content-Type: application/json" \
   -d '{"json":{"applicationId":"APP_ID","title":"Smoke deploy"}}' \
   https://your-dokploy.com/api/trpc/application.deploy
 ```
 
-### Method 2: Check Dokploy Version
+### Method 2: Check Dokploy version on the host
 
-SSH into your server:
 ```bash
 docker images | grep dokploy
 # or
 docker logs dokploy | head -20
 ```
 
-- **v0.9.x or earlier**: Likely REST
-- **v0.10.x or later**: Likely tRPC
+Heuristic only:
+- **v0.9.x or earlier**: more often REST-oriented
+- **v0.10.x or later**: more often tRPC-oriented
+
+Never trust the heuristic alone — probe endpoints.
 
 ### Method 3: Browser DevTools
 
 1. Open Dokploy dashboard
-2. Open Network tab (F12)
-3. Look at the URLs:
-   - Contains `/api/trpc/` = **tRPC**
-   - Contains `/api/` without `/trpc/` = **REST**
+2. Open Network tab
+3. Inspect request URLs:
+   - `/api/trpc/` → tRPC path in use
+   - `/api/` without `/trpc/` → REST/OpenAPI path in use
 
 ---
 
-## Example: Mixed Compatibility Server
+## Example: Mixed Compatibility Profile
 
-Based on real testing:
+Based on real multi-app production installs (anonymized):
 
-| Aspect | Value |
-|--------|-------|
-| **URL** | https://internal.vetgroom.com.mx |
-| **Reader support** | REST |
-| **Mutation support** | Mixed, validate per endpoint |
+| Aspect | Observation |
+|--------|-------------|
+| **Reader support** | REST `project.all` is the most reliable discovery path |
+| **Mutation support** | Mixed — validate per endpoint |
 | **Projects** | `/api/project.all` |
-| **Deploy** | `/api/application.deploy` |
-| **Token** | `sfox_...` (custom format) |
+| **Deploy** | Prefer `/api/application.deploy`, then tRPC fallback |
+| **Token formats** | `dokploy_...`, custom prefixes, or legacy tokens |
 
-**Working Commands:**
+**Working CLI pattern:**
 ```bash
-# Projects
 dokploy projects list
-
-# Applications
 dokploy apps list
 dokploy apps deploy --id APP_ID
-
-# User
 dokploy user info
 ```
 
-**Observed gaps:**
-- some installs do not expose `application.all`
-- some installs do not expose `application.restart`
-- some installs accept REST `application.deploy` while tRPC deploy is absent or unreliable
+**Observed gaps on some installs:**
+- no `application.all`
+- no `application.restart`
+- REST deploy works while tRPC deploy is absent (or the reverse)
 
 ---
 
-## CLI Auto-Detection
+## CLI Auto-Detection Algorithm
 
-The Dokploy CLI should auto-detect support conservatively:
+Implement conservatively:
 
-```python
-# 1. Try a stable REST reader first (GET /api/project.all)
-# 2. If 404, try tRPC (GET /api/trpc/project.all?batch=1)
-# 3. For each mutation, try REST first
-# 4. If the specific REST mutation fails with 404/405/400/500, try tRPC
-# 5. If list/detail endpoints are missing, fall back to project.all extraction
+```text
+1. Try stable REST reader: GET /api/project.all
+2. If 404, try tRPC reader
+3. For each mutation, try REST first
+4. On REST 404/405/400/500 for that mutation, try tRPC with {"json": payload}
+5. If list/detail endpoints are missing, extract from project.all
+6. Cache per-endpoint success mode for the session
 ```
 
-You don't need to configure this manually.
+Do not flip the whole client to "tRPC mode" after one failure.
 
 ---
 
 ## Token Formats
 
-Dokploy API keys can have different formats depending on version and configuration:
+| Format | Example | Notes |
+|--------|---------|-------|
+| Standard | `dokploy_a1b2c3...` | Common on newer installs |
+| Prefixed | `prod_dkp_live_...` | Custom naming via createApiKey |
+| Legacy/custom | site-specific prefixes | Still use `x-api-key` |
 
-| Format | Example | Version |
-|--------|---------|---------|
-| `dokploy_...` | `dokploy_a1b2c3...` | Standard v0.10+ |
-| Custom prefix | `prod_dkp_live_...` | Custom configured |
-| No prefix | `sfox_TSjkTfz...` | Custom/legacy |
+Token format does **not** determine REST vs tRPC. Always probe endpoints.
 
-**Important:** The token format doesn't determine API type. Always test the endpoints.
+Never print full tokens in logs, commits, or chat.
+
+---
+
+## Resource Nesting Variants
+
+`project.all` may return either:
+
+1. **Environment-aware:** `projects[].environments[].{applications,compose,postgres,...}`
+2. **Legacy flat:** `projects[].{applications,compose,postgres,...}`
+
+Agent code must iterate both shapes when resolving IDs.
 
 ---
 
 ## Troubleshooting
 
-### "404 Not Found" on all endpoints
+### `404` on every endpoint
 
-Your Dokploy might be:
-1. Using a different base path (e.g., `/api/v2/`)
-2. Behind a reverse proxy with different routing
-3. A very old version with different endpoints
+Possible causes:
+1. Wrong base URL / path (extra `/api`, missing domain, wrong port)
+2. Reverse proxy routing mismatch
+3. Very old Dokploy with different procedure names
 
-**Check:**
+Check on the host:
 ```bash
-# SSH to server and check
 docker ps
 docker logs dokploy
 ```
 
-### "401 Unauthorized" but key is correct
+### `401 Unauthorized` with a key that "looks right"
 
-- Key might be expired
-- Key might be for different organization
-- Server might use different auth method
+- Expired key
+- Key belongs to another organization/user
+- Wrong header (`Authorization: Bearer` instead of `x-api-key`)
+- Trailing whitespace when loading from env files
+
+### `403 Forbidden`
+
+User/role attached to the key lacks permission for that mutation.
+
+### Mutation returns `500` with "Invalid JSON"
+
+Often means the server expected the other body shape:
+- REST wants bare JSON
+- tRPC wants `{"json": ...}`
+
+Retry the alternate layer before declaring failure.
 
 ---
 
-## Summary
+## Summary Matrix
 
-| Your Server | Format | Base URL |
-|-------------|--------|----------|
-| VetGroom | REST | `https://internal.vetgroom.com.mx/api/` |
-| Standard v0.10+ | tRPC | `https://dokploy.com/api/trpc/` |
+| Profile | Typical discovery | Typical deploy |
+|---------|-------------------|----------------|
+| REST-leaning | `/api/project.all` | `/api/application.deploy` |
+| tRPC-leaning | `/api/trpc/project.all` | `/api/trpc/application.deploy` |
+| Mixed (common) | REST readers + endpoint-level mutation fallbacks | Probe REST, then tRPC |
 
-**Always test first, and validate the endpoint you actually need.**
+**Always test the endpoint you need before scripting a fleet operation.**
+
+See also: [REST_OPERATIONS.md](./REST_OPERATIONS.md)

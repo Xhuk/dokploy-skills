@@ -82,9 +82,17 @@ dokploy compose deploy --id COMPOSE_ID
 
 ---
 
+## Agent Skill
+
+Cursor / Codex agents should load [`SKILL.md`](SKILL.md) for expert Dokploy operations (discovery, REST↔tRPC fallbacks, deploy verification, rollback posture).
+
 ## API Reference
 
-See [docs/API_REFERENCE.md](docs/API_REFERENCE.md) for complete API documentation.
+| Doc | Purpose |
+|-----|---------|
+| [docs/REST_OPERATIONS.md](docs/REST_OPERATIONS.md) | Day-to-day REST playbook + fallbacks |
+| [docs/API_VERSIONS.md](docs/API_VERSIONS.md) | REST vs tRPC compatibility |
+| [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | Broader endpoint catalogue |
 
 ### Key Endpoints
 
@@ -97,6 +105,8 @@ See [docs/API_REFERENCE.md](docs/API_REFERENCE.md) for complete API documentatio
 | Restart App | `/api/application.restart` | POST |
 | List Compose | `/api/compose.all` | GET |
 | Deploy Compose | `/api/compose.deploy` | POST |
+
+**Note:** Some installs omit list/restart endpoints — extract resources from `project.all` and use stop+start. See `docs/API_VERSIONS.md`.
 
 ---
 
